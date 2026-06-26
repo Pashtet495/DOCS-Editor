@@ -19,7 +19,7 @@ SuperDoc is available under dual licensing:
 
 ### Рекомендуемые нейросети
 
-Рекомендуемая минимальная нейросеть для генерации: https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF в квантовании не ниже UD-Q2-K-XL.
+Рекомендуемая минимальная нейросеть для генерации: https://huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF в квантовании не ниже UD-Q2-K-XL.
 Для генерации эмбеддингов проверена с https://huggingface.co/unsloth/embeddinggemma-300m-GGUF (с квантизацией Q4_0).
 
 ### Ключевые возможности
