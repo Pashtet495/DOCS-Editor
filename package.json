@@ -1,6 +1,9 @@
 {
   "name": "docs-editor",
   "version": "1.0.0",
+  "description": "DOCS Editor — WYSIWYG редактор документов с RAG, AI-агентом, таблицами и калькулятором",
+  "author": "DOCS Editor Team",
+  "license": "MIT",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -62,6 +65,7 @@
     "jszip": "^3.10.1",
     "lucide-react": "^0.525.0",
     "mammoth": "^1.12.0",
+    "mathjs": "^15.2.0",
     "next": "^16.1.1",
     "next-auth": "^4.24.11",
     "next-intl": "^4.3.4",
@@ -106,22 +110,20 @@
     "files": [
       "electron/**/*",
       "package.json",
-      "next.config.ts",
-      "tsconfig.json",
-      "src/**/*",
-      "public/**/*",
-      "prisma/**/*",
-      "components.json",
-      "tailwind.config.ts",
-      "postcss.config.mjs",
-      ".next/standalone/**/*",
-      ".next/static/**/*",
       "!**/.DS_Store"
     ],
-    "asarUnpack": [
-      ".next/standalone/**/*",
-      ".next/static/**/*",
-      "public/**/*"
+    "asar": false,
+    "extraResources": [
+      {
+        "from": "out",
+        "to": "out",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "public",
+        "to": "public",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
       "target": [

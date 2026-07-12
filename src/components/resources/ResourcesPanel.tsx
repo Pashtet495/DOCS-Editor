@@ -1,13 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, FileCode2, Trash2, Pencil, ExternalLink } from "lucide-react";
+import { Plus, FileCode2, Trash2, Pencil, ExternalLink, Table2, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { FormulaCalculator } from "@/components/calculator/FormulaCalculator";
+import { AutoFillPanel } from "@/components/resources/AutoFillPanel";
+import { TableListPanel } from "@/components/table/TableListPanel";
+import { useEditorStore } from "@/store/editor-store";
+import type { ExternalResource, ResourceType } from "@/lib/editor/types";
 import {
   Select,
   SelectContent,
@@ -22,14 +27,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { useEditorStore } from "@/store/editor-store";
-import type { ExternalResource, ResourceType } from "@/lib/editor/types";
 
 export function ResourcesPanel() {
   const resources = useEditorStore((s) => s.docMap.externalResources);
   const addResource = useEditorStore((s) => s.addResource);
   const updateResource = useEditorStore((s) => s.updateResource);
   const removeResource = useEditorStore((s) => s.removeResource);
+  const formulaStore = useEditorStore((s) => s.formulaStore);
   const [editing, setEditing] = useState<ExternalResource | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -68,6 +72,17 @@ export function ResourcesPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* Table editor (Excel-like spreadsheets) */}
+        <TableListPanel />
+
+        {/* Formula/Calculator section — always visible. Document scanning
+            happens automatically in onBlocksUpdated. */}
+        {formulaStore && <FormulaCalculator />}
+
+        {/* Auto-fill fields (document template system) */}
+        <AutoFillPanel />
+
+        {/* External resources list */}
         {resources.length === 0 ? (
           <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
             <FileCode2 className="mx-auto mb-2 h-8 w-8 opacity-40" />

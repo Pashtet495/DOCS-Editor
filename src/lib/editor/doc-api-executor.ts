@@ -7,7 +7,7 @@
 // to build SelectionTarget for listItem and other non-edge-supported types.
 // ============================================================================
 
-import type { AgentCommand, CommandResult, DocumentMap } from "./types";
+import type { AgentCommand, CommandResult, DocumentMap, FormulaEntry } from "./types";
 import { renderCanvasPreview, resolveResourceValue } from "./superdoc-bridge";
 
 /** BlockNodeAddress — used as target for most Document API operations. */
@@ -451,6 +451,63 @@ async function applyOne(
 
     case "SET_TITLE": {
       return { ok: true, command: cmd, message: `title set to "${cmd.title}"` };
+    }
+
+    case "CREATE_FORMULA": {
+      // Create a new formula in the calculator's formula store.
+      // No editor mutation — just updates the formulaStore via callback.
+      const newId = `F${String(Date.now().toString(36).slice(-5))}`;
+      const formula: FormulaEntry = {
+        id: newId,
+        name: cmd.name,
+        formula: cmd.formula,
+        comment: cmd.comment,
+        userCreated: true,
+        pinned: false,
+      };
+      // Store it via the externalResources callback (hacky but works).
+      externalResources.push({
+        id: newId,
+        name: cmd.name,
+        type: "canvas" as const,
+        content: cmd.formula,
+        description: cmd.comment,
+      });
+      return { ok: true, command: cmd, message: `formula ${newId} (${cmd.name}) created`, affectedBlockId: newId };
+    }
+
+    case "UPDATE_FORMULA": {
+      // Update an existing formula in the calculator.
+      const existing = externalResources.find(r => r.id === cmd.formulaId);
+      if (!existing) {
+        return { ok: false, command: cmd, message: `formula ${cmd.formulaId} not found` };
+      }
+      if (cmd.formula) existing.content = cmd.formula;
+      if (cmd.comment) existing.description = cmd.comment;
+      return { ok: true, command: cmd, message: `formula ${cmd.formulaId} updated`, affectedBlockId: cmd.formulaId };
+    }
+
+    case "INSERT_FORMULA_BLOCK": {
+      // Insert a formula as an image (canvas-rendered LaTeX) into the document.
+      const latex = cmd.latex || "";
+      if (!latex) {
+        return { ok: false, command: cmd, message: "INSERT_FORMULA_BLOCK requires latex" };
+      }
+
+      // For now, insert as a simple paragraph with the formula text.
+      // Full canvas rendering requires async (KaTeX load) which the executor
+      // doesn't support well. The store's insertFormulaAtCursor handles this.
+      const at = parseLocation(cmd.afterBlockId ?? null, editor);
+      try {
+        // Insert a paragraph with {{F001:value}} marker.
+        const markerText = cmd.formulaId === "new"
+          ? `{{NEW:${latex}}}`
+          : `{{${cmd.formulaId}}}`;
+        editor.doc.create.paragraph({ at, text: markerText });
+        return { ok: true, command: cmd, message: `formula block inserted (${cmd.display || "formula"})`, affectedBlockId: cmd.formulaId };
+      } catch (e) {
+        return { ok: false, command: cmd, message: `insert failed: ${(e as Error).message}` };
+      }
     }
   }
 }

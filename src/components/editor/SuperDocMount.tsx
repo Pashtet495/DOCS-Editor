@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useEditorStore } from "@/store/editor-store";
-import { createSuperDocBridge, type SuperDocBridge } from "@/lib/editor/superdoc-bridge";
+import { createSuperDocBridge } from "@/lib/editor/superdoc-bridge";
+import { loadMath } from "@/lib/editor/math-loader";
 
 export function SuperDocMount() {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -13,8 +14,15 @@ export function SuperDocMount() {
   const setTotalPages = useEditorStore((s) => s.setTotalPages);
   const setReady = useEditorStore((s) => s.setReady);
   const user = useEditorStore((s) => s.user);
+  const formulaStore = useEditorStore((s) => s.formulaStore);
+  const editorMode = useEditorStore((s) => s.editorMode);
+  const mountedModeRef = useRef<"edit" | "view" | null>(null);
 
+  // Initial mount only — mode switching is handled by editor-store.setEditorMode()
   useEffect(() => {
+    // Preload math.js for formula evaluation and LaTeX conversion
+    loadMath().catch((e) => console.warn("[SuperDocMount] math.js load failed", e));
+
     if (!hostRef.current || !toolbarRef.current) return;
     let destroyed = false;
     const bridge = createSuperDocBridge();
@@ -25,14 +33,13 @@ export function SuperDocMount() {
         setReady(true);
       },
       onUpdate: (b) => !destroyed && onBlocksUpdated(b),
-      onPagination: (n) => !destroyed && setTotalPages(n),
+      onPagination: (n) => { if (!destroyed) setTotalPages(n); },
       onError: (e) => console.error("[superdoc]", e),
     });
     setBridge(bridge);
-    bridge.mount(hostRef.current, toolbarRef.current, null, user).catch((e) => {
+    bridge.mount(hostRef.current, toolbarRef.current, null, user, editorMode).catch((e) => {
       console.error("[superdoc mount failed]", e);
     });
-
     return () => {
       destroyed = true;
       bridge.destroy();
@@ -41,6 +48,27 @@ export function SuperDocMount() {
       setReady(false);
     };
   }, []);
+
+  // Register the formula store with the bridge
+  const bridge = useEditorStore((s) => s.bridge);
+  useEffect(() => {
+    if (bridge && formulaStore) bridge.registerFormulaStore(formulaStore);
+  }, [bridge, formulaStore]);
+
+  // Listen for formula-edit events from formulaBlock NodeViews (edit button click)
+  const openFormulaEditDialog = useEditorStore((s) => s.openFormulaEditDialog);
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const handleFormulaEdit = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { formulaId: string };
+      if (detail?.formulaId) {
+        openFormulaEditDialog(detail.formulaId);
+      }
+    };
+    host.addEventListener("formula-edit", handleFormulaEdit);
+    return () => host.removeEventListener("formula-edit", handleFormulaEdit);
+  }, [openFormulaEditDialog]);
 
   return (
     <div className="flex h-full w-full flex-col">

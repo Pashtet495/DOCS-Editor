@@ -78,26 +78,21 @@ function Inner({ state, onClose }: { state: CanvasEditorState; onClose: () => vo
     setGenError(null);
     try {
       const sys = `You generate ONLY raw JavaScript code that draws on a 2D canvas. Output nothing except code — no markdown fences, no explanation. The code receives (canvas, ctx) where canvas.width=600 and canvas.height=320. Draw the requested visualization using ONLY ctx methods (fillRect, strokeRect, moveTo, lineTo, arc, fillText, etc.). Use colors, labels, axes where appropriate. Do NOT use canvas variable reassignment.`;
-      const res = await fetch("/api/llm/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          baseUrl: llm.baseUrl,
-          apiKey: llm.apiKey,
-          model: llm.chatModel,
-          messages: [
-            { role: "system", content: sys },
-            { role: "user", content: genPrompt },
-          ],
-          temperature: 0.3,
-        }),
+      const { llmChat } = await import("@/lib/llm/llm-client");
+      const { content, error } = await llmChat({
+        baseUrl: llm.baseUrl,
+        apiKey: llm.apiKey,
+        model: llm.chatModel,
+        messages: [
+          { role: "system", content: sys },
+          { role: "user", content: genPrompt },
+        ],
+        temperature: 0.3,
       });
-      const data = await res.json();
-      if (data.error) {
-        setGenError(data.error);
+      if (error) {
+        setGenError(error);
       } else {
-        // Strip markdown fences if present.
-        const cleaned = (data.content || "").replace(/^```(?:javascript|js)?\s*/m, "").replace(/```\s*$/m, "").trim();
+        const cleaned = (content || "").replace(/^```(?:javascript|js)?\s*/m, "").replace(/```\s*$/m, "").trim();
         setCode(cleaned);
       }
     } catch (e) {

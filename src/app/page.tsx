@@ -50,8 +50,12 @@ import { useEditorStore } from "@/store/editor-store";
 import { AgentPanel } from "@/components/agent/AgentPanel";
 import { SettingsPanel } from "@/components/settings/SettingsPanel";
 import { ResourcesPanel } from "@/components/resources/ResourcesPanel";
+import { AutoFillXmlEditorDialog } from "@/components/resources/AutoFillXmlEditorDialog";
+import { TableEditorDialog } from "@/components/table/TableEditorDialog";
 import { CanvasEditorDialog } from "@/components/editor/CanvasEditorDialog";
 import { SearchPopover } from "@/components/editor/SearchPopover";
+import { FormulaInsertDialog } from "@/components/calculator/FormulaInsertDialog";
+import { FormulaEditDialog } from "@/components/calculator/FormulaEditDialog";
 
 const SuperDocMount = dynamic(
   () => import("@/components/editor/SuperDocMount").then((m) => m.SuperDocMount),
@@ -66,6 +70,8 @@ export default function Home() {
   const ready = useEditorStore((s) => s.ready);
   const totalPages = useEditorStore((s) => s.totalPages);
   const blocks = useEditorStore((s) => s.blocks);
+  const editorMode = useEditorStore((s) => s.editorMode);
+  const setEditorMode = useEditorStore((s) => s.setEditorMode);
   const openCanvasEditor = useEditorStore((s) => s.openCanvasEditor);
   const superdoc = useEditorStore((s) => s.superdoc);
   const locked = useEditorStore((s) => s.locked);
@@ -192,10 +198,32 @@ export default function Home() {
 
           <Separator orientation="vertical" className="h-6 mx-1" />
 
+          {/* Mode toggle: Edit (web) / View (paginated) */}
+          <div className="flex items-center gap-1 rounded-md border bg-muted/30 px-1.5 py-0.5">
+            <button
+              className={`text-[10px] px-2 py-0.5 rounded transition-colors ${editorMode === "edit" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+              onClick={() => setEditorMode("edit")}
+              disabled={!ready}
+              title="Режим редактирования (интерактивные блоки, разрывы страниц пунктиром)"
+            >
+              Редактирование
+            </button>
+            <button
+              className={`text-[10px] px-2 py-0.5 rounded transition-colors ${editorMode === "view" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+              onClick={() => setEditorMode("view")}
+              disabled={!ready}
+              title="Режим просмотра (листы с колонтитулами, печать)"
+            >
+              Просмотр
+            </button>
+          </div>
+
+          <Separator orientation="vertical" className="h-6 mx-1" />
+
           {/* Save (floppy disk) */}
           <IconButton icon={Save} title={dirty ? "Сохранить (есть изменения)" : "Сохранить"} onClick={() => void saveDocs()} disabled={!ready} active={dirty} />
-          {/* Ruler */}
-          <IconButton icon={Ruler} title="Линейки" onClick={toggleRuler} disabled={!ready} />
+          {/* Ruler — only available in view mode */}
+          <IconButton icon={Ruler} title={editorMode === "view" ? "Линейки" : "Линейки доступны в режиме просмотра"} onClick={toggleRuler} disabled={!ready || editorMode !== "view"} />
           {/* TOC with popover */}
           <Popover>
             <PopoverTrigger asChild>
@@ -227,7 +255,7 @@ export default function Home() {
           {/* Rollback AI */}
           <IconButton icon={Undo2} title="Отменить AI-изменения" onClick={() => void rollbackAi()} disabled={!preAiSnapshot} />
           {/* Print */}
-          <IconButton icon={Printer} title="Печать / PDF" onClick={handlePrint} disabled={!ready} />
+          <IconButton icon={Printer} title={editorMode === "view" ? "Печать / PDF" : "Печать доступна в режиме просмотра"} onClick={handlePrint} disabled={!ready || editorMode !== "view"} />
           {/* Import */}
           <IconButton icon={FileUp} title="Импорт DOCX" onClick={handleImportDocx} disabled={!ready} />
 
@@ -279,6 +307,10 @@ export default function Home() {
       </div>
 
       <CanvasEditorDialog />
+      <AutoFillXmlEditorDialog />
+      <TableEditorDialog />
+      <FormulaInsertDialog />
+      <FormulaEditDialog />
     </div>
   );
 }

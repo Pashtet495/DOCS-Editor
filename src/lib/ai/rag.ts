@@ -1,7 +1,8 @@
 // ============================================================================
 // RAG: per-block embeddings + cosine similarity search.
 //
-// Embeddings are computed via the /api/llm/embeddings route (OpenAI-compatible).
+// Embeddings are computed via llmEmbeddings (direct fetch to the
+// OpenAI-compatible provider — see src/lib/llm/llm-client.ts).
 // The block map is re-indexed when blocks change (debounced) and the vectors
 // live alongside the Block objects so they serialize into the DOCS archive.
 // ============================================================================
@@ -21,12 +22,9 @@ export async function fetchEmbeddings(
   inputs: string[],
 ): Promise<EmbedResponse> {
   if (!model) return { embeddings: [], error: "no embedding model selected" };
-  const res = await fetch("/api/llm/embeddings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ baseUrl, apiKey, model, input: inputs }),
-  });
-  return (await res.json()) as EmbedResponse;
+  const { llmEmbeddings } = await import("@/lib/llm/llm-client");
+  const { embeddings, error } = await llmEmbeddings({ baseUrl, apiKey, model, input: inputs });
+  return { embeddings, error };
 }
 
 function cosine(a: number[], b: number[]): number {

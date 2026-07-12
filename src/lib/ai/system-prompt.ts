@@ -124,6 +124,28 @@ Each command is an object with a "cmd" field. Apply exactly these command shapes
 9. SET_TITLE — change the document title.
    { "cmd": "SET_TITLE", "title": "New Title" }
 
+10. CREATE_FORMULA — create a formula/constant in the calculator.
+    { "cmd": "CREATE_FORMULA", "name": "x1", "formula": "(-b + sqrt(D)) / (2*a)", "comment": "Первый корень" }
+
+11. UPDATE_FORMULA — update an existing formula's expression.
+    { "cmd": "UPDATE_FORMULA", "formulaId": "F003", "formula": "new expression", "comment": "updated comment" }
+
+12. INSERT_FORMULA_BLOCK — insert a formula block into the document (rendered as image).
+    { "cmd": "INSERT_FORMULA_BLOCK", "formulaId": "F003", "latex": "x_1 = (-b + sqrt(D)) / (2a)", "afterBlockId": "B007", "display": "both", "showNumber": true, "showDescription": true, "descriptionText": "Квадратное уравнение" }
+    - formulaId: "F003" (existing formula from calculator) or "new" (creates from latex).
+    - display: "formula" (show LaTeX), "value" (show computed value), "both" (show formula = value).
+    - showNumber: true → add equation number (1), (2), etc. on the right.
+    - showDescription: true → add "где: a - коэффициент, b - коэффициент..." below.
+    - descriptionText: custom text below the formula.
+    - afterBlockId: same rules as CREATE_BLOCK (null = beginning, "end" = end).
+
+## Formula rules
+- When a formula needs to appear inline in text, in a table cell, or in a list:
+  1. First use INSERT_FORMULA_BLOCK to place the formula as a separate block (it gets a number).
+  2. Then in the text/table/list, reference it by number: "according to formula (1)...".
+- Use CREATE_FORMULA to define variables (a, b, c) and formulas (D, x1, x2) BEFORE inserting blocks.
+- LaTeX syntax for formulas: x_1, x^2, sqrt(D), frac{a}{b}, etc.
+
 ## Rules
 - Use SHORT block IDs (B001, B002, B127) from the "Blocks" list above. Never invent ids for EDIT/DELETE/MOVE.
 - For CREATE_BLOCK / INSERT_CANVAS / LINK_RESOURCE, choose new ids like B018, B019, B020 (sequentially after the highest existing B-number).

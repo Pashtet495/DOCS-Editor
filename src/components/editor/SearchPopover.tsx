@@ -73,19 +73,15 @@ export function SearchPopover() {
 
       // 2. Vector search (RAG) via embeddings.
       if ((mode === "vector" || mode === "both") && llm.embeddingModel && blocks.length > 0) {
-        const r = await fetch("/api/llm/embeddings", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            baseUrl: llm.baseUrl,
-            apiKey: llm.apiKey,
-            model: llm.embeddingModel,
-            input: [query],
-          }),
+        const { llmEmbeddings } = await import("@/lib/llm/llm-client");
+        const { embeddings: embResult, error: embError } = await llmEmbeddings({
+          baseUrl: llm.baseUrl,
+          apiKey: llm.apiKey,
+          model: llm.embeddingModel,
+          input: [query],
         });
-        const data = await r.json();
-        if (data.embeddings?.[0]) {
-          let qVec = data.embeddings[0] as number[];
+        if (embResult?.[0]) {
+          let qVec = embResult[0] as number[];
           // Matryoshka truncation for query vector.
           const mrlDim = (llm as { matryoshkaDim?: number }).matryoshkaDim || 0;
           if (mrlDim > 0 && qVec.length > mrlDim) qVec = qVec.slice(0, mrlDim);

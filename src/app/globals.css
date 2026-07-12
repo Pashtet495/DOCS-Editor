@@ -122,7 +122,8 @@
 }
 
 /* ============================================================================
-   superdoc editor surface — paginated pages on a grey canvas.
+   superdoc editor surface — vanilla SuperDoc styling.
+   Both edit and view modes use SuperDoc's native rendering.
    ============================================================================ */
 .superdoc-scroll {
   background: #828282;
@@ -134,15 +135,22 @@
   min-height: 100%;
 }
 
-.superdoc-host .superdoc__layers,
-.superdoc-host .superdoc-layout {
-  background: transparent;
-}
-
-.superdoc-host .superdoc-page {
+/* Formula block — interactive canvas block styling */
+.superdoc-host .formula-block {
+  display: block;
+  margin: 16px 0;
+  text-align: center;
   background: #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
-  margin-bottom: 24px;
+  border-radius: 4px;
+}
+.superdoc-host .formula-block.selected {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+.superdoc-host .formula-block canvas {
+  max-width: 100%;
+  display: inline-block;
+  background: #ffffff;
 }
 
 /* Toolbar should not collapse / hide buttons on narrow panels */
@@ -160,7 +168,25 @@
 }
 
 /* ============================================================================
-   Print mode — hide everything except the document pages.
+   Full-screen dialog — bumps overlay z-index above other z-50 elements
+   (SuperDoc toolbar, zoom controls, etc.) so the modal stays on top.
+   ============================================================================ */
+[data-slot="dialog-overlay"]:has(+ [data-slot="dialog-content"][style*="9999"]) {
+  z-index: 9998 !important;
+}
+
+/* Nested dialogs inside the table editor (z-9999) need a higher z-index
+   so they appear ON TOP of the table editor dialog. The overlay for these
+   nested dialogs must also be raised. */
+[data-slot="dialog-content"][style*="10001"] {
+  z-index: 10001 !important;
+}
+[data-slot="dialog-overlay"]:has(+ [data-slot="dialog-content"][style*="10001"]) {
+  z-index: 10000 !important;
+}
+
+/* ============================================================================
+   Print mode
    ============================================================================ */
 @media print {
   .superdoc-scroll {
@@ -171,11 +197,6 @@
   .superdoc-host {
     padding: 0 !important;
     max-width: none !important;
-  }
-  .superdoc-page {
-    box-shadow: none !important;
-    margin: 0 !important;
-    page-break-after: always;
   }
   .no-sidebar > main {
     flex: 1 !important;
