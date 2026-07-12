@@ -189,6 +189,8 @@ export function textOfBlock(b: Block): string {
       return `${b.title || ""}\n${b.code}`;
     case "external-ref":
       return `[ref:${b.resourceId}${b.query ? " " + b.query : ""}]`;
+    case "formula":
+      return `${b.latex}${b.value !== undefined ? " = " + b.value : ""}`;
   }
 }
 

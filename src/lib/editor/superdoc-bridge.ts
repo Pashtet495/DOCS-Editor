@@ -54,7 +54,7 @@ export interface BridgeUser {
 }
 
 export interface SuperDocBridge {
-  mount(host: HTMLElement, toolbarHost: HTMLElement, file?: File | Blob | null, user?: BridgeUser): Promise<void>;
+  mount(host: HTMLElement, toolbarHost: HTMLElement, file?: File | Blob | null, user?: BridgeUser, mode?: "edit" | "view"): Promise<void>;
   destroy(): void;
   setCallbacks(cb: BridgeCallbacks): void;
   getBlocks(): Block[];
@@ -68,6 +68,34 @@ export interface SuperDocBridge {
   setExternalResources(resources: DocumentMap["externalResources"]): void;
   getExternalResources(): DocumentMap["externalResources"];
   applyCommands(commands: AgentCommand[]): Promise<CommandResult[]>;
+  /** Insert an interactive formula block (canvas NodeView, NOT an image). */
+  insertFormulaBlock(opts: {
+    formulaId: string;
+    latex: string;
+    designation?: string;
+    value?: number;
+    showDesignation?: boolean;
+    showFormula?: boolean;
+    showValue?: boolean;
+    showNumber?: boolean;
+    equationNumber?: number;
+    showDescription?: boolean;
+    descriptionText?: string;
+  }): boolean;
+  /** Update formula blocks in the document when values are recalculated. */
+  updateFormulaBlocks(formulaId: string, updates: Record<string, unknown>): void;
+  /** Restore formulaBlock nodes from text markers (after loading a DOCX in edit mode). */
+  restoreFormulaBlocksFromMarkers(): number;
+  /** Render all formulaBlock nodes as images (for view mode). */
+  renderFormulaBlocksAsImages(): Promise<number>;
+  /** Get the editor JSON with formulaBlock nodes replaced by images (for view mode jsonOverride). */
+  getViewJsonWithImages(): Promise<unknown | null>;
+  /** Collect all formulaBlock data (including cached canvas) for .docs persistence. */
+  collectFormulaBlockData(): unknown[];
+  /** Restore formulaBlock nodes from saved data (includes cached canvas). */
+  restoreFormulaBlocksFromData(data: unknown[]): number;
+  /** Register the formula store so NodeViews can read it. */
+  registerFormulaStore(store: unknown): void;
 }
 
 class SuperDocBridgeImpl implements SuperDocBridge {
@@ -80,6 +108,18 @@ class SuperDocBridgeImpl implements SuperDocBridge {
   private superDocCtor: SuperDocCtor | null = null;
   private blankDocxUrl: string | null = null;
   private updateTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Custom formula block extension (ProseMirror node with canvas NodeView). */
+  private formulaBlockExtension: unknown = null;
+  /** Helpers from formula-block-node.ts. */
+  private formulaBlockHelpers: {
+    registerFormulaStore: (id: string, store: unknown) => void;
+    unregisterFormulaStore: (id: string) => void;
+    setActiveEditorId: (id: string) => void;
+    insertFormulaBlock: (editor: unknown, opts: Record<string, unknown>) => boolean;
+    updateFormulaBlocks: (editor: unknown, formulaId: string, updates: Record<string, unknown>) => void;
+  } | null = null;
+  /** Reference to the formula-block-node module (loaded in loadModule). */
+  private formulaBlockMod: typeof import("./formula-block-node") | null = null;
 
   constructor() {
     this.docMap = {
@@ -126,9 +166,23 @@ class SuperDocBridgeImpl implements SuperDocBridge {
     await import("@harbour-enterprises/superdoc/style.css");
     this.superDocCtor = mod.SuperDoc;
     this.blankDocxUrl = mod.BlankDOCX;
+    try {
+      const ext = await import("./formula-block-node");
+      this.formulaBlockExtension = ext.formulaBlockNode;
+      this.formulaBlockMod = ext;
+      this.formulaBlockHelpers = {
+        registerFormulaStore: ext.registerFormulaStore,
+        unregisterFormulaStore: ext.unregisterFormulaStore,
+        setActiveEditorId: ext.setActiveEditorId,
+        insertFormulaBlock: ext.insertFormulaBlock,
+        updateFormulaBlocks: ext.updateFormulaBlocks,
+      };
+    } catch (e) {
+      console.warn("[superdoc-bridge] formula-block-node load failed, extension disabled:", e);
+    }
   }
 
- async mount(host: HTMLElement, toolbarHost: HTMLElement, file?: File | Blob | null, user?: BridgeUser) {
+ async mount(host: HTMLElement, toolbarHost: HTMLElement, file?: File | Blob | null, user?: BridgeUser, mode: "edit" | "view" = "edit", jsonOverride?: unknown) {
     this.host = host;
     this.toolbarHost = toolbarHost;
     await this.loadModule();
@@ -138,19 +192,28 @@ class SuperDocBridgeImpl implements SuperDocBridge {
     host.id = host.id || `superdoc-host-${uid}`;
     toolbarHost.id = toolbarHost.id || `superdoc-toolbar-${uid}`;
 
+    const isViewMode = mode === "view";
+
     const config: Record<string, unknown> = {
       selector: `#${host.id}`,
-      documentMode: "editing",
+      documentMode: isViewMode ? "viewing" : "editing",
       toolbar: `#${toolbarHost.id}`,
       isDev: false,
       disablePiniaDevtools: false,
-      viewOptions: { layout: "print" },
-      layoutEngineOptions: {
-        flowMode: "paginated",
-        pageSize: { w: 794, h: 1123 },
-        margins: { top: 96, right: 96, bottom: 96, left: 96, header: 48, footer: 48 },
-        virtualization: { enabled: true, window: 6, overscan: 2 },
-      },
+      // Register custom extensions ONLY in edit mode (the paginated presentation-editor
+      // in view mode doesn't support custom node views — formula blocks render as images).
+      ...(!isViewMode && this.formulaBlockExtension ? { editorExtensions: [this.formulaBlockExtension] } : {}),
+      viewOptions: { layout: isViewMode ? "print" : "web" },
+      ...(isViewMode ? {
+        rulers: true,
+        useLayoutEngine: true,
+        layoutEngineOptions: {
+          flowMode: "paginated",
+          // Don't force pageSize/margins — let the layout engine use the
+          // document's native page size (Letter, A4, etc.) for accurate pagination.
+          virtualization: { enabled: true, window: 6, overscan: 2 },
+        },
+      } : {}),
       // User identity — shown as comment author and used for track changes.
       user: user
         ? { name: user.name, email: user.email, color: user.color }
@@ -164,15 +227,37 @@ class SuperDocBridgeImpl implements SuperDocBridge {
         },
         comments: { visible: false, displayMode: "sidebar" },
       },
+      // jsonOverride: when provided, the editor loads this JSON instead of
+      // parsing the DOCX. Used for view mode (JSON has formula images instead
+      // of formulaBlock nodes).
+      ...(jsonOverride ? { jsonOverride } : {}),
     };
 
     if (file) {
-      config.document = file as File;
+      config.documents = [{
+        id: `doc-${Date.now()}`,
+        type: "docx",
+        data: file as File,
+        name: "document.docx",
+      }];
     } else if (this.blankDocxUrl) {
-      const blob = await fetch(this.blankDocxUrl).then((r) => r.blob());
-      config.document = new File([blob], "blank.docx", {
-        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      });
+      try {
+        const resp = await fetch(this.blankDocxUrl);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const blankFile = new File([blob], "blank.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          });
+          config.documents = [{
+            id: `doc-${Date.now()}`,
+            type: "docx",
+            data: blankFile,
+            name: "blank.docx",
+          }];
+        }
+      } catch (e) {
+        console.error("[bridge] blank DOCX fetch error:", e);
+      }
     }
 
     this.superdoc = new Ctor(config);
@@ -219,15 +304,121 @@ class SuperDocBridgeImpl implements SuperDocBridge {
     this.resyncBlocks();
   }
 
+  /**
+   * Get the editor's ProseMirror JSON with formulaBlock nodes replaced by
+   * image nodes (rendered via renderFormula). Used for view mode: the JSON
+   * is passed as jsonOverride when loading in view mode, so the layout
+   * engine sees images from the start.
+   */
+  async getViewJsonWithImages(): Promise<unknown | null> {
+    if (!this.superdoc) return null;
+    const ed = (this.superdoc as { activeEditor?: { getJSON?: () => unknown } })?.activeEditor;
+    if (!ed?.getJSON) return null;
+    const json = ed.getJSON();
+    // Walk the JSON and replace formulaBlock nodes with image nodes
+    const { renderFormula } = await import("./formula-renderer");
+    return this.replaceFormulaBlocksInJson(json, renderFormula);
+  }
+
+  /** Recursively walk ProseMirror JSON and replace formulaBlock nodes with images. */
+  private async replaceFormulaBlocksInJson(json: unknown, renderFormula: typeof import("./formula-renderer")["renderFormula"]): Promise<unknown> {
+    if (Array.isArray(json)) {
+      const result: unknown[] = [];
+      for (const item of json) {
+        result.push(await this.replaceFormulaBlocksInJson(item, renderFormula));
+      }
+      return result;
+    }
+    if (json && typeof json === "object") {
+      const obj = json as Record<string, unknown>;
+      if (obj.type === "formulaBlock" && obj.attrs) {
+        // Replace with an image node
+        const attrs = obj.attrs as Record<string, unknown>;
+        try {
+          const { dataUrl, width, height } = await renderFormula({
+            latex: attrs.latex as string,
+            value: attrs.value as number | undefined,
+            display: (attrs.display as "formula" | "value" | "both") || "both",
+            showNumber: attrs.showNumber as boolean,
+            equationNumber: attrs.equationNumber as number,
+            showDescription: attrs.showDescription as boolean,
+            descriptionText: attrs.descriptionText as string,
+          });
+          if (dataUrl) {
+            return {
+              type: "image",
+              attrs: {
+                src: dataUrl,
+                alt: `[formula:${attrs.formulaId}]`,
+                size: { width, height, unit: "px" },
+              },
+            };
+          }
+        } catch (e) {
+          console.error("[replaceFormulaBlocksInJson] render failed", e);
+        }
+        // Fallback: keep the formulaBlock as a paragraph with marker text
+        return {
+          type: "paragraph",
+          content: [{ type: "text", text: `[formula:${attrs.formulaId}]` }],
+        };
+      }
+      // Recurse into content
+      const result: Record<string, unknown> = {};
+      for (const key of Object.keys(obj)) {
+        result[key] = await this.replaceFormulaBlocksInJson(obj[key], renderFormula);
+      }
+      return result;
+    }
+    return json;
+  }
+
   async exportDocx(): Promise<Blob> {
     if (!this.superdoc) throw new Error("superdoc not mounted");
+    // Before exporting: replace formulaBlock nodes with text markers,
+    // then restore them after export so the editor keeps working.
+    const { replaceFormulaBlocksWithMarkers, restoreFormulaBlocksFromMarkers } = await import("./formula-block-node");
+    const editor = (this.superdoc as { activeEditor?: unknown })?.activeEditor;
+    let replaced = 0;
+    if (editor) {
+      replaced = replaceFormulaBlocksWithMarkers(editor);
+      if (replaced > 0) await new Promise((r) => setTimeout(r, 1000));
+    }
+    try {
+      const blob = await this.superdoc.export({ exportType: "docx", triggerDownload: false });
+      return blob;
+    } finally {
+      // Restore formulaBlock nodes after export
+      if (editor && replaced > 0) {
+        restoreFormulaBlocksFromMarkers(editor);
+      }
+    }
+  }
+
+  /**
+   * Export a view-mode DOCX with formula blocks rendered as images.
+   * Replaces formulaBlock nodes with images (not markers), then exports.
+   * Does NOT restore the original nodes (the document is left with images).
+   * Use this to generate the view.docx for the .docs archive.
+   */
+  async exportViewDocx(): Promise<Blob> {
+    if (!this.superdoc) throw new Error("superdoc not mounted");
+    const { replaceFormulaBlocksWithImages } = await import("./formula-block-node");
+    const editor = (this.superdoc as { activeEditor?: unknown })?.activeEditor;
+    console.log("[exportViewDocx] editor:", !!editor);
+    if (editor) {
+      const count = await replaceFormulaBlocksWithImages(editor);
+      console.log("[exportViewDocx] replaced", count, "blocks with images");
+      // Wait for ProseMirror + Yjs to sync before exporting
+      await new Promise((r) => setTimeout(r, 2000));
+    }
     return this.superdoc.export({ exportType: "docx", triggerDownload: false });
   }
 
-  async loadDocx(file: File | Blob, user?: BridgeUser) {
+  async loadDocx(file: File | Blob | null, user?: BridgeUser, mode?: "edit" | "view", jsonOverride?: unknown) {
     if (!this.host || !this.toolbarHost) throw new Error("bridge not mounted");
     this.destroy();
-    await this.mount(this.host, this.toolbarHost, file, user);
+    await this.mount(this.host, this.toolbarHost, file, user, mode, jsonOverride);
   }
 
   destroy() {
@@ -245,6 +436,81 @@ class SuperDocBridgeImpl implements SuperDocBridge {
   // AI command execution is handled by the store via Document API executor.
   async applyCommands(_commands: AgentCommand[]): Promise<CommandResult[]> {
     return [];
+  }
+
+  insertFormulaBlock(opts: {
+    formulaId: string;
+    latex: string;
+    value?: number;
+    display?: "formula" | "value" | "both";
+    showNumber?: boolean;
+    equationNumber?: number;
+    showDescription?: boolean;
+    descriptionText?: string;
+  }): boolean {
+    if (!this.superdoc?.activeEditor || !this.formulaBlockHelpers) {
+      console.error("[bridge] cannot insert formula block — editor or helpers not ready");
+      return false;
+    }
+    return this.formulaBlockHelpers.insertFormulaBlock(this.superdoc.activeEditor, opts);
+  }
+
+  updateFormulaBlocks(formulaId: string, updates: Record<string, unknown>): void {
+    if (!this.superdoc?.activeEditor || !this.formulaBlockHelpers) return;
+    this.formulaBlockHelpers.updateFormulaBlocks(this.superdoc.activeEditor, formulaId, updates);
+  }
+
+  restoreFormulaBlocksFromMarkers(): number {
+    if (!this.superdoc?.activeEditor) return 0;
+    if (!this.formulaBlockMod) return 0;
+    try {
+      return this.formulaBlockMod.restoreFormulaBlocksFromMarkers(this.superdoc.activeEditor);
+    } catch (e) {
+      console.warn("[restoreFormulaBlocksFromMarkers] failed", e);
+      return 0;
+    }
+  }
+
+  collectFormulaBlockData(): unknown[] {
+    if (!this.superdoc?.activeEditor || !this.formulaBlockMod) return [];
+    try {
+      return this.formulaBlockMod.collectFormulaBlockData(this.superdoc.activeEditor);
+    } catch (e) {
+      console.warn("[collectFormulaBlockData] failed", e);
+      return [];
+    }
+  }
+
+  restoreFormulaBlocksFromData(data: unknown[]): number {
+    if (!this.superdoc?.activeEditor || !this.formulaBlockMod) return 0;
+    try {
+      return this.formulaBlockMod.restoreFormulaBlocksFromData(
+        this.superdoc.activeEditor,
+        data as Array<Record<string, unknown>>,
+      );
+    } catch (e) {
+      console.warn("[restoreFormulaBlocksFromData] failed", e);
+      return 0;
+    }
+  }
+
+  async renderFormulaBlocksAsImages(): Promise<number> {
+    if (!this.superdoc?.activeEditor) return 0;
+    try {
+      const { replaceFormulaBlocksWithImages } = await import("./formula-block-node");
+      return await replaceFormulaBlocksWithImages(this.superdoc.activeEditor);
+    } catch (e) {
+      console.warn("[renderFormulaBlocksAsImages] failed", e);
+      return 0;
+    }
+  }
+
+  registerFormulaStore(store: unknown): void {
+    if (!this.formulaBlockHelpers) return;
+    // Use a stable id for this bridge instance.
+    const id = `bridge-${this.host?.id || "default"}`;
+    this.formulaBlockHelpers.setActiveEditorId(id);
+    this.formulaBlockHelpers.registerFormulaStore(id, store);
   }
 }
 

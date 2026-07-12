@@ -14,7 +14,8 @@ export type BlockType =
   | 'image'
   | 'table'
   | 'canvas'
-  | 'external-ref';
+  | 'external-ref'
+  | 'formula';
 
 export interface BlockBase {
   /** Stable block id, e.g. "B007". */
@@ -91,7 +92,35 @@ export type Block =
   | ImageBlock
   | TableBlock
   | CanvasBlock
-  | ExternalRefBlock;
+  | ExternalRefBlock
+  | FormulaBlock;
+
+export interface FormulaDisplayOptions {
+  /** What to show: formula LaTeX, computed value, or both. */
+  display: 'formula' | 'value' | 'both';
+  /** Show equation number on the right, e.g. (1). */
+  showNumber?: boolean;
+  /** Show "где: var - comment" section below. */
+  showDescription?: boolean;
+  /** Which variables to include in description (by name). If omitted, all. */
+  descriptionVars?: string[];
+  /** Custom text below "Где:" section. */
+  descriptionText?: string;
+}
+
+export interface FormulaBlock extends BlockBase {
+  type: 'formula';
+  /** Formula ID from FormulaStore, e.g. "F003". */
+  formulaId: string;
+  /** LaTeX expression. */
+  latex: string;
+  /** Computed value (updated on recalc). */
+  value?: number;
+  /** Display options. */
+  displayOptions: FormulaDisplayOptions;
+  /** Equation number (auto-assigned). */
+  equationNumber?: number;
+}
 
 export interface StyleDef {
   id: string; // S01
@@ -106,7 +135,7 @@ export interface StyleDef {
   lineHeight?: number;
 }
 
-export type ResourceType = 'xml' | 'json' | 'csv';
+export type ResourceType = 'xml' | 'json' | 'csv' | 'canvas';
 
 export interface ExternalResource {
   id: string; // R001
@@ -114,6 +143,51 @@ export interface ExternalResource {
   type: ResourceType;
   content: string;
   description?: string;
+  dataUrl?: string;
+  lang?: 'js' | 'ts';
+}
+
+// ============================================================================
+// LaTeX Formula System — unified formula/constant entities.
+// Formulas in the calculator ARE the same entities referenced in the document.
+// Document contains {{F001}} markers; calculator stores the formula + value.
+// ============================================================================
+
+/** A formula entity — used both in calculator and as document reference. */
+export interface FormulaEntry {
+  id: string;             // F001
+  name: string;           // variable name, e.g. "x1", "a", "D" — used as designation
+  formula: string;        // expression, e.g. "(-b + sqrt(D)) / (2*a)"
+  value?: number;         // computed value
+  latex?: string;         // LaTeX representation for display (optional)
+  comment?: string;
+  /** True if this formula is referenced in the document via {{F001}}. */
+  inDocument?: boolean;
+  /** Block IDs where this formula is referenced. */
+  blockIds?: string[];
+  userCreated?: boolean;
+  pinned?: boolean;
+  /** Manual equation number (when set, overrides auto-numbering). */
+  number?: number;
+}
+
+/** Legacy alias — CalcConstant is now the same as FormulaEntry. */
+export type CalcConstant = FormulaEntry;
+
+export interface CalcHistoryEntry {
+  expr: string;
+  result: string;
+  raw: string | number;
+}
+
+export interface FormulaStore {
+  /** All formula entities (constants + formulas + document references). */
+  formulas: FormulaEntry[];
+  history: CalcHistoryEntry[];
+  settings: {
+    resultFormat: 'normal' | 'scientific';
+    angleUnit: 'deg' | 'rad';
+  };
 }
 
 export interface PageSize {
@@ -135,6 +209,8 @@ export interface DocumentMap {
   styles: StyleDef[];
   blocks: Block[];
   externalResources: ExternalResource[];
+  /** LaTeX formula store — saved in .docs archive. */
+  formulaStore?: FormulaStore;
 }
 
 // ============================================================================
@@ -190,7 +266,34 @@ export type AgentCommand =
       content: string;
       description?: string;
     }
-  | { cmd: 'SET_TITLE'; title: string };
+  | { cmd: 'SET_TITLE'; title: string }
+  | {
+      cmd: 'CREATE_FORMULA';
+      name: string;
+      formula: string;
+      comment?: string;
+    }
+  | {
+      cmd: 'UPDATE_FORMULA';
+      formulaId: string;
+      formula?: string;
+      comment?: string;
+    }
+  | {
+      cmd: 'INSERT_FORMULA_BLOCK';
+      /** Formula ID from calculator, or "new" to create from formula expression. */
+      formulaId: string;
+      /** LaTeX expression (if formulaId is "new" or to override). */
+      latex?: string;
+      /** Where to insert: "B007" = after block B007, null = start, "end" = end. */
+      afterBlockId: string | null;
+      /** Display options. */
+      display?: 'formula' | 'value' | 'both';
+      showNumber?: boolean;
+      showDescription?: boolean;
+      /** Custom "Где:" text. */
+      descriptionText?: string;
+    };
 
 export interface CommandResult {
   ok: boolean;
